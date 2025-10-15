@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html>
+
+<head lang="fr">
+    <meta charset="UTF-8">
+    <!--Page Title-->
+    <title>Hack-Oeil - Les CTFs de Cyrhades</title>
+    <!--Meta Keywords and Description-->
+    <meta name="keywords" content="">
+    <meta name="description" content="">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+    <link rel="shortcut icon" href="./assets/images/favicon.ico" title="Favicon" />
+    <link rel="stylesheet" href="./assets/css/style.css">
+    <link href='https://fonts.googleapis.com/css?family=Open+Sans:400,300,600,700,800' rel='stylesheet' type='text/css'>
+    <link rel="stylesheet" href="./assets/css/github.min.css">
+    <script src="./assets/js/highlight.min.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // Vérifie si la fenêtre est dans une iframe
+            if (window.self !== window.top) {
+                document.querySelectorAll('a').forEach((link) => {
+                    link.addEventListener('click', (event) => {
+                        const a = event.target.closest('a[href^="http"]');
+                        if (a) {
+                            event.preventDefault();
+                            window.parent.postMessage({
+                                type: "open-external",
+                                url: a.href
+                            }, "*");
+                        }
+                    });
+                });
+            }
+            // Active la coloration syntaxique :
+            if (window.hljs) {
+                hljs.highlightAll();
+            } else {
+                console.error("Highlight.js non chargé !");
+            }
+        });
+    </script>
+</head>
+
+<body>
+
+    <div id="wrapper">
+        <!--Main Content Area-->
+        <main id="content">
+            <!--Ctf-->
+            <section class="ctf scrollto">
+                <article class="row clearfix">
+                    <div class="col-1">
+                        <div class="section-heading">
+                            <h3>Challenge #288</h3>
+                            <h2 class="section-title">Gaston La Paffe</h2>
+                            <p>
+                                Gaston travaille dans une administration. Il passe son temps à traiter des courriers
+                                divers. Il trouve que son emploi n’est pas rémunéré à sa juste valeur : cela fait plus
+                                de 10 ans qu’il n’a pas eu de prime alors qu’il ne fait que 3 siestes par jour ! Comble
+                                de l’injustice, parmi tous les courriers qu’il a traité les 10 ans passés, il a vu
+                                passer plus de 500 notifications de primes pour ses collègues !
+                                <br /><br />
+                                Ces notifications sont malheureusement toutes signées avec une méthode innovante
+                                inventée par la direction. Seule la direction a la clé privée permettant de signer.
+                                <br /><br />
+                                Gaston a rédigé son courrier de prime idéal. S’il y avait un moyen d’y ajouter la
+                                signature de la direction, il glisserait sa notification avec les autres. Comme la
+                                direction n’a qu’une parole, ils lui accorderaient cette prime !
+                                <br /><br />
+                                On dirait bien qu’il y a une fuite dans la méthode de signature. Gaston compte sur vous
+                                pour l’aider à retrouver la clé de signature utilisée par sa direction.
+
+                            </p>
+                            <h4>Fichier à étudier</h4>
+                            <p>
+                                - gaston.py<br />
+                                - output.txt
+                            </p>
+                            <br />
+                            <strong>gaston.py</strong>
+                            <pre><code class="language-python">import os
+import json
+import hashlib
+import string
+import numpy as np
+from Crypto.Random.random import randint, choice
+from Crypto.Hash import SHA512, SHA256
+from Crypto.Util.number import bytes_to_long
+from Crypto.Cipher import AES
+from Crypto.Util.Padding import pad
+
+Q = 8383489
+B = 16384
+N = 512
+
+class Server:
+    def __init__(self, Q, B, N):
+        self.Q = Q
+        self.B = B
+        self.N = N
+        self.a = [randint(0, Q - 1) for _ in range(self.N)]
+        self.__s1 = [randint(-1, 1) % Q for _ in range(self.N)]
+        self.__s2 = [randint(-1, 1) % Q for _ in range(self.N)]
+        self.t = self.poly_mul_add(self.a, self.__s1, self.__s2)
+
+    def sk(self):
+        return self.__s1, self.__s2
+
+    def pk(self):
+        return self.a, self.t
+
+    def H(self, v1, m):
+        h = bytes_to_long(SHA512.new(str(v1).encode() + m).digest())
+        h = list(map(int, list(f"{h:0512b}")))
+        return h
+
+    def poly_add(self, p1, p2):
+        return [ (p1[i] + p2[i]) % self.Q for i in range(self.N) ]
+
+    def poly_sub(self, p1, p2):
+        return [ (p1[i] - p2[i]) % self.Q for i in range(self.N) ]
+
+    def poly_mul_add(self, p1, p2, p3):
+        return self.poly_add(self.poly_mul(p1, p2), p3)
+
+    def poly_mul(self, p1,p2):
+        res = np.convolve(p1, p2)
+        res = [0] * (2 * self.N - 1 - len(res)) + list(res)
+        a = list(map(int, res[:self.N]))
+        b = list(map(int, res[self.N:] + [0]))
+        res = self.poly_sub(a, b)
+        return res
+
+    def reject(self, z):
+        for v in z:
+            if v > self.B and v < self.Q - self.B:
+                return True
+        return False
+
+    def sign(self, m):
+        while True:
+            y1 = [ randint(-self.B, self.B) % self.Q for _ in range(self.N) ]
+            y2 = [ randint(-self.B, self.B) % self.Q for _ in range(self.N) ]
+            h = self.poly_mul_add(self.a, y1, y2)
+            c = self.H(h, m)
+            z1 = self.poly_mul_add(self.__s1, c, y1)
+            z2 = self.poly_mul_add(self.__s2, c, y2)
+            if self.reject(z1) or self.reject(z2):
+                continue
+            return y1, z1, z2, c
+
+    def verify(self, z1, z2, c, m):
+        if self.reject(z1) or self.reject(z2):
+            return False
+        temp1 = self.poly_mul_add(self.a, z1, z2)
+        temp2 = self.poly_mul(self.t, c)
+        h = self.poly_sub(temp1, temp2)
+        c_prime = self.H(h, m)
+        return c == c_prime
+
+def get_random_string(length):
+    return ''.join(choice(string.ascii_letters) for _ in range(length))
+
+if __name__ == "__main__":
+
+    server = Server(Q, B, N)
+    a, t = server.pk()
+    print(json.dumps({
+        "a": a,
+        "t": t,
+    }))
+
+    data = []
+    for i in range(N):
+        message = get_random_string(20)
+        y1, z1, z2, c = server.sign(message.encode())
+        assert server.verify(z1, z2, c, message.encode()), "Error: verification error."
+        data.append({
+            "message": message,
+            "z1": z1,
+            "z2": z2,
+            "c": c,
+            "y1": y1,
+        })
+    print(json.dumps(data))
+
+    flag = open("flag.txt", "rb").read()
+    s1, s2 = server.sk()
+    key = SHA256.new(str(s1).encode() + str(s2).encode()).digest()
+    iv = os.urandom(16)
+    E = AES.new(key, AES.MODE_CBC, iv = iv)
+    enc = E.encrypt(pad(flag, 16))
+    print(json.dumps({
+        "iv": iv.hex(),
+        "enc": enc.hex()
+    }))
+</code></pre>
+                        </div>
+                    </div>
+                </article>
+
+                <article class="row clearfix">
+                    <div class="col-1">
+                        <div class="section-heading">
+                            <h3>FCSC 2022</h3>
+                            <h2 class="section-title">Hackropole</h2>
+                            <p class="section-subtitle">
+                                Lien officiel :
+                                <a target="_blank"
+                                    href="https://hackropole.fr/fr/challenges/crypto/fcsc2022-crypto-gaston-la-paffe/">FCSC
+                                    2022 -
+                                    Gaston La Paffe
+                                </a>
+                                <br />
+                                Auteur: Mélissa
+                            </p>
+                        </div>
+                    </div>
+                </article>
+
+                <article class="row clearfix">
+                    <div class="col-1">
+                        <div class="section-heading">
+                            <h3>Apprentissage</h3>
+                            <h2 class="section-title">Documentations et Vidéos</h2>
+                            <p class="section-subtitle">
+                                Aucune documentation pour le moment
+                            </p>
+                        </div>
+                    </div>
+                </article>
+
+                <article class="row clearfix">
+                    <div class="col-1">
+                        <div class="section-heading">
+                            <h3>Aide</h3>
+                            <h2 class="section-title">Conseils et indices</h2>
+                            <p class="section-subtitle">
+                                <a target="_blank"
+                                    href="https://discord.com/channels/1175764392307077120/1175764601716092948">Fil sur
+                                    le Discord</a>
+                            </p>
+                        </div>
+                    </div>
+                </article>
+            </section>
+            <!--End of Ctf-->
+        </main>
+        <!--End Main Content Area-->
+
+        <a id="scrollUp" href="#wrapper" style="position: fixed; z-index: 1000;"
+            aria-label="Remonter en haut de la page" title="Remonter en tête de site"></a>
+    </div>
+</body>
+
+</html>
